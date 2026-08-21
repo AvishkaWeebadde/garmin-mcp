@@ -110,7 +110,7 @@ WSL convention is `webi`-style: versioned dir in `~/.local/opt`, symlink without
 - [x] `tools/call` working end to end (`scripts/mcp_probe.py`, raw JSON-RPC)
 - [x] Full tool surface per contract — 3 tools, 7/7 happy paths conformant
 - [x] Wired into Claude Desktop through WSL — connected, protocol 2025-11-25, 3 tools announced in-app (2026-08-21)
-- [~] Real provider — **`.FIT` file** chosen (Strava API now paid); source-agnostic, filename-id primary + `file_id` fallback. `FitFileActivityProvider` written (Garmin FIT SDK `com.garmin:fit:21.176.0`), **compiles**. Not yet run against real `.fit` data — no test fixtures exist. Provider selection: `@ConditionalOnProperty fitmcp.provider` (`stub` default, `fit` opt-in) + `fitmcp.fit.directory`.
+- [~] Real provider — **`.FIT` file** chosen (Strava API now paid); source-agnostic, filename-id primary + `file_id` fallback. `FitFileActivityProvider` (Garmin FIT SDK `com.garmin:fit:21.176.0`). **Verified: 6/6 tests** encode synthetic FIT via the SDK and assert mapping (fields, null-vs-zero, hiking→walk, multisport ordinals + transition drop, id fallback, range/sport filters). **Still unproven on a real Strava export** (exotic sub_sport, `.fit.gz` in the wild, manufacturer quirks) — that's the last gap. Selection: `@ConditionalOnProperty fitmcp.provider` (`stub` default, `fit` opt-in) + `fitmcp.fit.directory`.
 
 ### Phase 2 — Go (go-sdk, streamable HTTP + stateless)
 - [ ] Same contract, stub provider
