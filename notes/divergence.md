@@ -136,6 +136,50 @@ This matters for Phase 2's framing. The Java/Go split is not "stateful vs statel
 
 ---
 
+## FIT-provider findings (against a real Strava export, 2026-08-21)
+
+F-010…F-012 are a different class from the above: found by running the `fit` provider
+over a real Strava bulk export (249 activities), not from the wire against the stub. They
+anticipate Phase 3's FIT-vs-Strava-provider comparison rather than Java-vs-Go. A new axis
+applies: **source drift** — the same activity differs because it came through the `.FIT`
+binary path rather than Strava's JSON API.
+
+## F-010 — FIT distances carry float32 quantization noise
+
+**Source drift.** The FIT SDK's `SessionMesg.getTotalDistance()` returns a 32-bit `Float`;
+widening it to the contract's `double` exposes the binary fraction. Measured:
+
+```
+distanceMeters: 5256.58984375     (a 5.26 km run)
+distanceMeters: 1120.6500244140625
+```
+
+A Strava-API provider returns already-clean doubles (`5256.6`), so the **same activity will
+diverge on every distance — and every derived `averagePaceSecondsPerKm`** — between the two
+providers. Not spec or framework drift: a fidelity artifact of the binary source.
+
+**Decision: keep distances raw.** Contract v1 does not specify distance precision, and
+rounding here would pick one silently and destroy the divergence that is the point. The FIT
+path reports what the file actually holds. Phase 3 records the delta against Strava; it is a
+finding, not an error to paper over. (Consistent with pace being emitted unrounded.)
+
+## F-011 — One corrupt export file; skip-and-log held
+
+**Provider behaviour, by design.** Of 188 `.fit.gz`, one (`14155167394.fit.gz`) is
+truncated — `FitRuntimeException: Unexpected end of input stream at byte: 63701`. Strava's
+export occasionally ships a damaged file. The provider logged it and indexed the other
+**187**, rather than failing the whole source. This is the skip-and-log decision (ADR-0012)
+paying off on real data: `ProviderUnavailableException` is reserved for the source being
+gone, not one bad file.
+
+## F-012 — GPX-only activities are invisible to a FIT-only provider
+
+**Source coverage drift.** The export holds **188 `.fit.gz` + 61 `.gpx` = 249** activities.
+The provider reads only FIT, so ~24% of activities — older ones Strava kept only as GPX —
+silently do not appear. A Strava-API provider returns all 249. So `listActivities` counts
+are provider-dependent, and the gap is structural, not a bug: this athlete's pre-FIT history
+is GPX-only. Adding a GPX adapter behind the same seam would close it, if ever wanted.
+
 ## Confirmed non-findings
 
 Verified working and contract-conformant on the Java side, so a Phase 3 difference here is a genuine Go finding:
