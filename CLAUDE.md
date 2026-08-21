@@ -109,7 +109,7 @@ WSL convention is `webi`-style: versioned dir in `~/.local/opt`, symlink without
 - [x] Server starts clean, stdout uncorrupted across a full session
 - [x] `tools/call` working end to end (`scripts/mcp_probe.py`, raw JSON-RPC)
 - [x] Full tool surface per contract — 3 tools, 7/7 happy paths conformant
-- [ ] Wired into Claude Desktop through WSL
+- [x] Wired into Claude Desktop through WSL — connected, protocol 2025-11-25, 3 tools announced in-app (2026-08-21)
 - [ ] Real provider (Strava or `.FIT`)
 
 ### Phase 2 — Go (go-sdk, streamable HTTP + stateless)
@@ -128,9 +128,12 @@ Phase 2 starts within ~3 weeks of Phase 1 finishing. Longer than that and the co
 
 *(maintained by Claude Code)*
 
-- **Current phase**: Phase 1 — Java server working over stdio, conformant on all happy paths
-- **Last session**: 2026-08-05 — contract v1 frozen; Java implementation built and verified end to end on JDK 21 via `./mvnw`. 7/7 happy-path calls conform; 9 findings recorded in `notes/divergence.md` before Go exists. ADRs 0001–0011.
-- **Next**: two open decisions below, then Claude Desktop wiring, then a real provider.
+- **Current phase**: Phase 1 — Java server working over stdio, conformant on all happy paths; Claude Desktop wiring in progress
+- **Last session**: 2026-08-21 — pushed to `github.com/AvishkaWeebadde/garmin-mcp` (source/contract/ADRs/notes only; jar, logs, tokens gitignored). Wiring launch-path decided (WSL). `claude_desktop_config.json` written to `%APPDATA%\Claude\`; the exact `wsl.exe -e <jdk21>/java -jar <jar>` form verified to handshake via `mcp_probe.py` (must run from PowerShell, not Git Bash — MSYS mangles the `/home/...` arg).
+- **Prev session**: 2026-08-05 — contract v1 frozen; Java built/verified on JDK 21 via `./mvnw`. 7/7 happy paths conform; 9 findings in `notes/divergence.md`. ADRs 0001–0011.
+- **Next**: a real provider (Strava or `.FIT`); then Phase 2 (Go).
+- **Wiring notes (packaged Claude Desktop, MSIX)**: this build is the Store/MSIX package. It ignores plain `%APPDATA%\Roaming\Claude`; the real config is sandboxed at `%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\claude_desktop_config.json`, and that file **also holds cowork/preferences** — `mcpServers` must be *merged in*, not overwritten. There is no Developer-mode toggle. Live logs are at `%LOCALAPPDATA%\Claude\logs\` (`mcp-server-fitmcp.log`, `main.log`), NOT the sandbox `logs\`.
+- **Cold-start trap**: cold WSL launch took ~13s (JVM+WSL spin-up) vs Claude Desktop's 10s `ensureAllConfiguredConnected` budget → tools briefly announce empty, then re-announce on connect. Recovers on its own; a native-Windows JVM would start inside the window. Data point for the WSL-vs-native call, not a blocker.
 - **Open**:
   - F-008 — `limit`'s contractual max of 100 is enforced by nobody. Fixing it picks a side on error channel; decide deliberately.
   - F-001 — Spring AI prefixes error text, so contract §1.7 wording is unreachable via annotations. Left unresolved on purpose; do not weaken the contract to hide it.
@@ -144,7 +147,7 @@ Phase 2 starts within ~3 weeks of Phase 1 finishing. Longer than that and the co
 - 2026-08-03 — One git repo, both languages inside it. Separate repos make the Phase 3 side-by-side diff ceremony.
 - 2026-08-03 — WSL toolchains installed user-local under `~/.local/opt` rather than via apt. `sudo` needs a password, and it matches the `webi` layout already on the machine.
 - 2026-08-03 — Provider OAuth kept outside the MCP process (shared token file). The stdio server can't host a callback, so anything else would make the two implementations structurally different for a reason unrelated to MCP.
-- **Open** — Java server via WSL vs natively on Windows. WSL is the documented plan; native Windows would delete the `wsl.exe`/`JAVA_HOME`/path-translation trap class at no cost to what the project is about. No longer blocks the build (ADR-0007 retired the Maven question); still open for the Claude Desktop wiring.
+- 2026-08-21 — **Resolved**: Claude Desktop launches the jar via WSL, not native Windows JDK 21. WSL already has JDK 21 (Windows has only 17), so this needs no new install; accepted the `wsl.exe`/path-translation trap surface in exchange. Config: `command: wsl.exe`, `args: -e /home/avishka/.local/opt/jdk/bin/java -jar /mnt/f/...jar`.
 - 2026-08-05 — Claude wrote the Java implementation at explicit request. ADR-0001 records the exception and its cost.
 - 2026-08-05 — Contract written and frozen *before* any implementation, including a normative stub dataset. Without shared fixtures every Phase 3 diff would be noise.
 - 2026-08-05 — camelCase wire names (ADR-0003); nulls always present (ADR-0004); `bySport` an ordered array not a map (ADR-0005); error channel split by who-got-it-wrong (ADR-0006).
