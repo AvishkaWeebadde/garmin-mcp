@@ -51,6 +51,17 @@
       <version>2.2.38</version>
     </dependency>
 
+    <!--
+      Official Garmin FIT Java SDK, on Maven Central since 2023. Used only by the
+      fit-file ActivityProvider to decode .FIT activity files; the tool layer never
+      sees a FIT type. Version pinned; the SDK's version tracks the FIT profile.
+    -->
+    <dependency>
+      <groupId>com.garmin</groupId>
+      <artifactId>fit</artifactId>
+      <version>21.176.0</version>
+    </dependency>
+
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-test</artifactId>

@@ -3,6 +3,7 @@ package dev.fitmcp.provider;
 import dev.fitmcp.domain.ActivityDetail;
 import dev.fitmcp.domain.ActivitySummary;
 import dev.fitmcp.domain.Sport;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -21,6 +22,7 @@ import java.util.Optional;
  * <p>If you change a value here, change the JSON and the Go stub in the same commit.
  */
 @Component
+@ConditionalOnProperty(name = "fitmcp.provider", havingValue = "stub", matchIfMissing = true)
 public class StubActivityProvider implements ActivityProvider {
 
     private static final List<ActivityDetail> ACTIVITIES = List.of(
