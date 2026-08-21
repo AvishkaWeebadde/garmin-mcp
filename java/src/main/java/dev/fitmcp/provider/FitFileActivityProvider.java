@@ -1,9 +1,11 @@
 package dev.fitmcp.provider;
 
+import com.garmin.fit.Decode;
 import com.garmin.fit.FileIdMesg;
-import com.garmin.fit.FitDecoder;
-import com.garmin.fit.FitMessages;
+import com.garmin.fit.FileIdMesgListener;
+import com.garmin.fit.MesgBroadcaster;
 import com.garmin.fit.SessionMesg;
+import com.garmin.fit.SessionMesgListener;
 import dev.fitmcp.domain.ActivityDetail;
 import dev.fitmcp.domain.ActivitySummary;
 import dev.fitmcp.domain.Sport;
@@ -15,6 +17,7 @@ import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -24,6 +27,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.stream.Stream;
 import java.util.zip.GZIPInputStream;
 
@@ -31,14 +36,19 @@ import java.util.zip.GZIPInputStream;
  * Reads activities from a directory of {@code .FIT} files — a Strava bulk export, or raw
  * Garmin files, or both. See the design decisions logged in CLAUDE.md (2026-08-21).
  *
- * <p><strong>Index once.</strong> Every file is decoded a single time at construction and
- * held in memory as {@link ActivityDetail}. FIT decoding is not free and {@code
- * listActivities} is a range scan; re-parsing per call would re-decode the whole archive
- * constantly. The cost is that this is a <em>snapshot</em>: a new export needs a restart.
- * That is the trade accepted when choosing {@code .FIT} over Strava's (now paid) live API.
+ * <p><strong>Index once, off the startup path.</strong> Every file is decoded a single time
+ * and held in memory. Decoding is done on a background thread so the constructor returns
+ * immediately: the MCP server answers {@code initialize} / {@code tools/list} — and the
+ * tools appear in the client — while indexing proceeds. The first query blocks on the index
+ * (see {@link #activities()}); later queries are instant. This keeps a cold start from
+ * making the whole server look absent while it decodes a large export.
+ *
+ * <p><strong>Snapshot.</strong> A new export needs a restart — the trade accepted when
+ * choosing {@code .FIT} over Strava's (now paid) live API.
  *
  * <p><strong>Ordering and limiting are not done here.</strong> Like the stub, this returns
- * range-filtered results in index order; the tool layer imposes the contract's ordering.
+ * range-filtered results in no guaranteed order; the tool layer imposes the contract's
+ * ordering. That freedom is also what lets indexing run in parallel.
  *
  * <p>Selected by {@code fitmcp.provider=fit}; the stub is the default. The files directory
  * is {@code fitmcp.fit.directory}.
@@ -49,7 +59,7 @@ public class FitFileActivityProvider implements ActivityProvider {
 
     private static final Logger log = LoggerFactory.getLogger(FitFileActivityProvider.class);
 
-    private final List<ActivityDetail> activities;
+    private final CompletableFuture<List<ActivityDetail>> index;
 
     public FitFileActivityProvider(@Value("${fitmcp.fit.directory}") String directory) {
         Path dir = Path.of(directory);
@@ -59,55 +69,86 @@ public class FitFileActivityProvider implements ActivityProvider {
             throw new IllegalStateException(
                     "fitmcp.fit.directory is not a directory: " + dir.toAbsolutePath());
         }
-        this.activities = index(dir);
-        log.info("Indexed {} activities from FIT files in {}",
-                activities.size(), dir.toAbsolutePath());
-    }
-
-    private static List<ActivityDetail> index(Path dir) {
-        List<ActivityDetail> out = new ArrayList<>();
-        try (Stream<Path> paths = Files.list(dir)) {
-            paths.filter(FitFileActivityProvider::isFitFile)
-                    .sorted()
-                    .forEach(p -> indexFile(p, out));
-        } catch (IOException e) {
-            throw new IllegalStateException("cannot list FIT directory: " + dir.toAbsolutePath(), e);
-        }
-        return List.copyOf(out);
+        log.info("Indexing FIT files in {} (background)", dir.toAbsolutePath());
+        this.index = CompletableFuture.supplyAsync(() -> buildIndex(dir));
     }
 
     /**
-     * Decode one file and append its activities. One bad file must not sink the whole
-     * index: a partial index still answers most queries, so parse failures are logged and
-     * skipped rather than propagated. {@link ProviderUnavailableException} is reserved for
-     * the source itself being gone, which for a local directory means startup, not here.
+     * The indexed activities, blocking until the background decode completes. A failure to
+     * build the index (the directory became unreadable) surfaces as
+     * {@link ProviderUnavailableException} on the query, per the interface contract — a
+     * genuine "source unreachable", distinct from an empty result.
      */
-    private static void indexFile(Path path, List<ActivityDetail> out) {
+    private List<ActivityDetail> activities() {
+        try {
+            return index.join();
+        } catch (CompletionException e) {
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            throw new ProviderUnavailableException("FIT index build failed", cause);
+        }
+    }
+
+    private static List<ActivityDetail> buildIndex(Path dir) {
+        try (Stream<Path> paths = Files.list(dir)) {
+            // Parallel: each file decodes independently and the tool layer re-sorts, so
+            // index order does not matter here.
+            List<ActivityDetail> out = paths
+                    .filter(FitFileActivityProvider::isFitFile)
+                    .parallel()
+                    .flatMap(p -> parseFile(p).stream())
+                    .toList();
+            log.info("Indexed {} activities from FIT files in {}", out.size(), dir.toAbsolutePath());
+            return out;
+        } catch (IOException e) {
+            throw new UncheckedIOException("cannot list FIT directory: " + dir.toAbsolutePath(), e);
+        }
+    }
+
+    /**
+     * Decode one file into its activities. One bad file must not sink the index: a partial
+     * index still answers most queries, so parse failures are logged and the file yields
+     * nothing. {@link ProviderUnavailableException} is reserved for the source being gone.
+     *
+     * <p>Uses the low-level {@link Decode} with listeners for only {@code session} and
+     * {@code file_id}. {@code FitDecoder} would materialise and retain every message type —
+     * including the thousands of per-second {@code record} messages a FIT file is mostly
+     * made of — none of which this provider needs.
+     */
+    private static List<ActivityDetail> parseFile(Path path) {
+        List<SessionMesg> sessionMesgs = new ArrayList<>();
+        List<FileIdMesg> fileIdMesgs = new ArrayList<>();
         try (InputStream raw = Files.newInputStream(path);
              InputStream in = isGzip(path) ? new GZIPInputStream(raw) : raw) {
 
-            FitMessages messages = new FitDecoder().decode(in);
-
-            // One activity per session, not per file. Transition legs of a multisport
-            // event are dropped: they are gaps between activities, not activities.
-            List<SessionMesg> sessions = messages.getSessionMesgs().stream()
-                    .filter(s -> s.getSport() != com.garmin.fit.Sport.TRANSITION)
-                    .toList();
-            if (sessions.isEmpty()) {
-                return;
-            }
-
-            String baseId = deriveBaseId(path, messages.getFileIdMesgs());
-            boolean multisport = sessions.size() > 1;
-            for (int i = 0; i < sessions.size(); i++) {
-                // Bare id for the ordinary single-session file; an ordinal suffix only for
-                // genuine multisport, where one filename cannot identify N legs.
-                String id = multisport ? baseId + "-" + i : baseId;
-                out.add(toDetail(id, sessions.get(i)));
-            }
+            Decode decode = new Decode();
+            MesgBroadcaster broadcaster = new MesgBroadcaster(decode);
+            broadcaster.addListener((SessionMesgListener) sessionMesgs::add);
+            broadcaster.addListener((FileIdMesgListener) fileIdMesgs::add);
+            decode.read(in, broadcaster);
         } catch (Exception e) {
             log.warn("skipping unreadable FIT file {}: {}", path.getFileName(), e.toString());
+            return List.of();
         }
+
+        // One activity per session, not per file. Transition legs of a multisport event are
+        // dropped: they are gaps between activities, not activities.
+        List<SessionMesg> sessions = sessionMesgs.stream()
+                .filter(s -> s.getSport() != com.garmin.fit.Sport.TRANSITION)
+                .toList();
+        if (sessions.isEmpty()) {
+            return List.of();
+        }
+
+        String baseId = deriveBaseId(path, fileIdMesgs);
+        boolean multisport = sessions.size() > 1;
+        List<ActivityDetail> out = new ArrayList<>(sessions.size());
+        for (int i = 0; i < sessions.size(); i++) {
+            // Bare id for the ordinary single-session file; an ordinal suffix only for
+            // genuine multisport, where one filename cannot identify N legs.
+            String id = multisport ? baseId + "-" + i : baseId;
+            out.add(toDetail(id, sessions.get(i)));
+        }
+        return out;
     }
 
     /**
@@ -184,7 +225,7 @@ public class FitFileActivityProvider implements ActivityProvider {
         // Inclusive end: everything strictly before the start of the following day.
         Instant toExclusive = endInclusive.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant();
 
-        return activities.stream()
+        return activities().stream()
                 .filter(a -> !a.startTime().isBefore(from) && a.startTime().isBefore(toExclusive))
                 .filter(a -> sport == null || a.sport() == sport)
                 .map(FitFileActivityProvider::toSummary)
@@ -193,7 +234,7 @@ public class FitFileActivityProvider implements ActivityProvider {
 
     @Override
     public Optional<ActivityDetail> getActivity(String activityId) {
-        return activities.stream()
+        return activities().stream()
                 .filter(a -> a.activityId().equals(activityId))
                 .findFirst();
     }

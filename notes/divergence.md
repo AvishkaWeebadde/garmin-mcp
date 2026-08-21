@@ -163,14 +163,23 @@ rounding here would pick one silently and destroy the divergence that is the poi
 path reports what the file actually holds. Phase 3 records the delta against Strava; it is a
 finding, not an error to paper over. (Consistent with pace being emitted unrounded.)
 
-## F-011 — One corrupt export file; skip-and-log held
+## F-011 — Decode strategy changes corruption tolerance (187 vs 188)
 
-**Provider behaviour, by design.** Of 188 `.fit.gz`, one (`14155167394.fit.gz`) is
-truncated — `FitRuntimeException: Unexpected end of input stream at byte: 63701`. Strava's
-export occasionally ships a damaged file. The provider logged it and indexed the other
-**187**, rather than failing the whole source. This is the skip-and-log decision (ADR-0012)
-paying off on real data: `ProviderUnavailableException` is reserved for the source being
-gone, not one bad file.
+**Provider behaviour; a decode-strategy artifact.** One file (`14155167394.fit.gz`) is
+truncated — `Unexpected end of input stream at byte: 63701`. Strava's export occasionally
+ships a damaged file.
+
+- With the high-level `FitDecoder.decode()` (original), the integrity check failed on the
+  truncation and the whole file was **skipped → 187** indexed. Skip-and-log held.
+- With the low-level `Decode` + selective listeners (cold-start rewrite, 2026-08-21), the
+  `session` message had already been read *before* byte 63701, and the lenient read did not
+  reject the truncated tail → the activity is **recovered → 188** indexed.
+
+So how many activities a corrupt file yields depends on the decode path, not just the file.
+Both are defensible: strict rejects a damaged file whole; lenient salvages a complete
+session summary from an otherwise-truncated file. Kept lenient — the recovered summary is a
+valid `session`, and skip-and-log still covers files too damaged to yield one. Worth
+re-checking against Strava's API in Phase 3, which would return this activity regardless.
 
 ## F-012 — GPX-only activities are invisible to a FIT-only provider
 
