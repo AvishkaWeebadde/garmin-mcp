@@ -1,0 +1,20 @@
+# --- secrets: provider tokens live outside the MCP process, but never in git ---
+*.token
+token.json
+.env
+
+# --- Java ---
+target/
+*.jar
+fitmcp.log
+
+# --- Go ---
+/go/bin/
+*.exe
+
+# --- editors / OS ---
+.idea/
+.vscode/
+*.iml
+Thumbs.db
+desktop.ini

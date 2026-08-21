@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <!--
+    Spring Boot 4.1.0, not 4.0.x: spring-ai-starter-mcp-server:2.0.0 declares a
+    direct dependency on spring-boot-starter:4.1.0. See docs/adr/0002.
+  -->
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>4.1.0</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>dev.fitmcp</groupId>
+  <artifactId>fitmcp-java</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <name>fitmcp-java</name>
+  <description>MCP server exposing fitness activity data over stdio. Conforms to contract v1.</description>
+
+  <properties>
+    <!-- Built and run on the WSL Temurin 21 JDK. See docs/adr/0007. -->
+    <java.version>21</java.version>
+    <spring-ai.version>2.0.0</spring-ai.version>
+  </properties>
+
+  <dependencies>
+    <!--
+      spring-ai-starter-mcp-server, NOT -webmvc or -webflux.
+      The web variants drag in a servlet container and force HTTP transport;
+      this server speaks stdio.
+    -->
+    <dependency>
+      <groupId>org.springframework.ai</groupId>
+      <artifactId>spring-ai-starter-mcp-server</artifactId>
+    </dependency>
+
+    <!--
+      Arrives transitively via Spring AI's schema generator, but is declared
+      explicitly because it is compile-time load-bearing: @Schema(nullable = true)
+      is the only supported way to make the generated output schema admit a null,
+      and without it every response containing an unmeasured field fails the SDK's
+      own output validation. See docs/adr/0011.
+    -->
+    <dependency>
+      <groupId>io.swagger.core.v3</groupId>
+      <artifactId>swagger-annotations-jakarta</artifactId>
+      <version>2.2.38</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.springframework.ai</groupId>
+        <artifactId>spring-ai-bom</artifactId>
+        <version>${spring-ai.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+      </plugin>
+    </plugins>
+  </build>
+
+</project>

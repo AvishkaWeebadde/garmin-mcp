@@ -1,0 +1,13 @@
+# The Maven wrapper is generated on Windows with CRLF, but is executed by bash in
+# WSL, where CRLF makes it fail with a confusing "bad interpreter" error.
+# Pin the shell script to LF and the batch script to CRLF, regardless of platform.
+mvnw            text eol=lf
+*.sh            text eol=lf
+mvnw.cmd        text eol=crlf
+*.bat           text eol=crlf
+
+# Contract and fixture files are diffed across implementations; keep them stable.
+*.md            text eol=lf
+*.json          text eol=lf
+*.java          text eol=lf
+*.properties    text eol=lf

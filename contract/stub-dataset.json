@@ -1,0 +1,94 @@
+{
+  "_comment": [
+    "Normative fixture data for the stub ActivityProvider. Part of contract v1.",
+    "Both the Java and Go implementations MUST return exactly these activities.",
+    "Phase 3 diffs wire JSON from two servers; if their stub data differs, every",
+    "comparison is worthless. This file is the single source of truth for that data.",
+    "",
+    "Chosen to exercise the awkward cases deliberately:",
+    "  stub-2, stub-6 : no heart-rate data      -> null, not omitted, not 0 (ADR-0004)",
+    "  stub-4         : zero distance           -> averagePaceSecondsPerKm is null",
+    "  all five sports appear                   -> exercises the closed enum",
+    "  July 2026 only                           -> empty-range queries are easy to construct"
+  ],
+  "activities": [
+    {
+      "activityId": "stub-1",
+      "name": "Morning run",
+      "sport": "run",
+      "startTime": "2026-07-02T06:12:33Z",
+      "durationSeconds": 3120,
+      "distanceMeters": 8000.0,
+      "averageHeartrateBpm": 152,
+      "movingTimeSeconds": 3000,
+      "elevationGainMeters": 42.0,
+      "maxHeartrateBpm": 171,
+      "calories": 610
+    },
+    {
+      "activityId": "stub-2",
+      "name": "Commute",
+      "sport": "ride",
+      "startTime": "2026-07-03T07:45:00Z",
+      "durationSeconds": 1800,
+      "distanceMeters": 12500.5,
+      "averageHeartrateBpm": null,
+      "movingTimeSeconds": 1700,
+      "elevationGainMeters": 88.5,
+      "maxHeartrateBpm": null,
+      "calories": null
+    },
+    {
+      "activityId": "stub-3",
+      "name": "Pool session",
+      "sport": "swim",
+      "startTime": "2026-07-05T18:20:10Z",
+      "durationSeconds": 2700,
+      "distanceMeters": 2000.0,
+      "averageHeartrateBpm": 128,
+      "movingTimeSeconds": 2400,
+      "elevationGainMeters": 0.0,
+      "maxHeartrateBpm": 145,
+      "calories": 430
+    },
+    {
+      "activityId": "stub-4",
+      "name": "Strength",
+      "sport": "other",
+      "startTime": "2026-07-08T17:00:00Z",
+      "durationSeconds": 3600,
+      "distanceMeters": 0.0,
+      "averageHeartrateBpm": 110,
+      "movingTimeSeconds": 3600,
+      "elevationGainMeters": 0.0,
+      "maxHeartrateBpm": 138,
+      "calories": 300
+    },
+    {
+      "activityId": "stub-5",
+      "name": "Long run",
+      "sport": "run",
+      "startTime": "2026-07-12T05:30:00Z",
+      "durationSeconds": 7500,
+      "distanceMeters": 21097.5,
+      "averageHeartrateBpm": 148,
+      "movingTimeSeconds": 7200,
+      "elevationGainMeters": 315.0,
+      "maxHeartrateBpm": 168,
+      "calories": 1520
+    },
+    {
+      "activityId": "stub-6",
+      "name": "Evening walk",
+      "sport": "walk",
+      "startTime": "2026-07-14T19:05:45Z",
+      "durationSeconds": 2400,
+      "distanceMeters": 2600.0,
+      "averageHeartrateBpm": null,
+      "movingTimeSeconds": 2280,
+      "elevationGainMeters": 12.0,
+      "maxHeartrateBpm": null,
+      "calories": 120
+    }
+  ]
+}
