@@ -102,13 +102,13 @@ WSL convention is `webi`-style: versioned dir in `~/.local/opt`, symlink without
 ## Milestones
 
 ### Phase 0 — contract
-- [x] `contract/tools.md` written and frozen (v1, 2026-08-05)
+- [x] `contract/tools.md` written and frozen (v1, 2026-08-05; **v2 2026-08-21 adds getTrends**)
 - [x] `contract/stub-dataset.json` — normative fixture data both implementations must return
 
 ### Phase 1 — Java (Spring AI, stdio)
 - [x] Server starts clean, stdout uncorrupted across a full session
 - [x] `tools/call` working end to end (`scripts/mcp_probe.py`, raw JSON-RPC)
-- [x] Full tool surface per contract — 3 tools, 7/7 happy paths conformant
+- [x] Full tool surface per contract — 4 tools (getTrends added in v2), happy paths conformant; 10 unit tests green
 - [x] Wired into Claude Desktop through WSL — connected, protocol 2025-11-25, 3 tools announced in-app (2026-08-21)
 - [x] Real provider — **`.FIT` file** (Strava API now paid). `FitFileActivityProvider` (Garmin FIT SDK `com.garmin:fit:21.176.0`), selected by `@ConditionalOnProperty fitmcp.provider=fit` + `fitmcp.fit.directory`. Verified 6/6 synthetic encode-decode tests **and against a real Strava export** (249 activities: 187/188 `.fit.gz` indexed, 1 corrupt skipped, 61 `.gpx` ignored). Findings F-010–F-012 logged. **Only gap left: real multisport** — no transition-bearing file appeared, so the ordinal-id path is synthetic-only.
 
@@ -149,6 +149,7 @@ Phase 2 starts within ~3 weeks of Phase 1 finishing. Longer than that and the co
 - 2026-08-03 — WSL toolchains installed user-local under `~/.local/opt` rather than via apt. `sudo` needs a password, and it matches the `webi` layout already on the machine.
 - 2026-08-03 — Provider OAuth kept outside the MCP process (shared token file). The stdio server can't host a callback, so anything else would make the two implementations structurally different for a reason unrelated to MCP.
 - 2026-08-21 — **Resolved**: Claude Desktop launches the jar via WSL, not native Windows JDK 21. WSL already has JDK 21 (Windows has only 17), so this needs no new install; accepted the `wsl.exe`/path-translation trap surface in exchange. Config: `command: wsl.exe`, `args: -e /home/avishka/.local/opt/jdk/bin/java -jar /mnt/f/...jar`.
+- 2026-08-21 — **Contract v2**: added a 4th tool `getTrends` (calendar-bucketed history, week/month), and a server-side plan-generator was **rejected** (uncontractable prose; reasoning belongs to the client, which builds plans from the trends in chat). Tools 1–3 unchanged; `periodSummary` promoted to a shared def and reused as each bucket. ADR-0013. **Phase 2 obligation**: Go must implement `getTrends` to conform to v2 — the week/month boundary math + empty-bucket policy are the likeliest divergence, pinned in §2.4.
 - 2026-08-21 — FIT **distances kept raw**, not rounded (finding F-010). FIT SDK returns 32-bit `Float`; widened to `double` this shows float32 noise (`5256.58984375`) a Strava-API provider would not. Contract v1 pins no distance precision; rounding would silently pick one and erase the divergence that is the deliverable. Consistent with pace being unrounded.
 - 2026-08-21 — **Claude wrote `FitFileActivityProvider` at explicit request** ("start writing the FIT provider"). Second Claude-authored exception after ADR-0001; same cost (user's hands off this code). Compiles against `com.garmin:fit:21.176.0`; **unverified against real `.fit` data — none exists yet**. Provider selection via `@ConditionalOnProperty(fitmcp.provider)` — stub default (matchIfMissing), `fit` opt-in — so existing tests/behaviour are untouched. Candidate ADR-0012 (FIT provider) + ADR to record this exception.
 - 2026-08-21 — First real provider is **`.FIT` file, not Strava OAuth**. Strava's API stopped being free on 2026-06-01 ($11.99/mo subscription, per-developer, no free tier); the free bulk export ships `.FIT` files, which feed the `fit-file` seam already in the architecture. Strava-OAuth adapter deferred, not dropped. **Pinned-fact update**: the CLAUDE.md line "Strava OAuth 2 works today" is now cost-gated.

@@ -10,12 +10,17 @@ import org.springframework.ai.mcp.annotation.McpTool;
 import org.springframework.ai.mcp.annotation.McpToolParam;
 import org.springframework.stereotype.Component;
 
+import java.time.DayOfWeek;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.time.temporal.TemporalAdjusters;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 /**
  * The three tools of contract v1.
@@ -108,18 +113,81 @@ public class ActivityTools {
         List<ActivityDetail> details = fromProvider(
                 () -> provider.listActivityDetails(startDate, endDate, null));
 
+        return summarize(details, startDate.toString(), endDate.toString());
+    }
+
+    @McpTool(
+            name = "getTrends",
+            title = "Historical training trends",
+            description = "Break an inclusive date range into consecutive calendar buckets (weekly or "
+                    + "monthly) and summarise training volume in each, with a per-sport breakdown. Use "
+                    + "this to see how volume changes over time and to reason about trends when building "
+                    + "a plan; each bucket has the same shape as summarizePeriod.",
+            generateOutputSchema = true)
+    public TrendsResult getTrends(
+            @McpToolParam(description = "First day of the range, inclusive, as a UTC calendar date.",
+                    required = true) LocalDate startDate,
+            @McpToolParam(description = "Last day of the range, inclusive, as a UTC calendar date.",
+                    required = true) LocalDate endDate,
+            @McpToolParam(description = "Bucket granularity: 'week' (default) or 'month'.",
+                    required = false) BucketUnit bucket) {
+
+        requireOrderedRange(startDate, endDate);
+        BucketUnit unit = (bucket == null) ? BucketUnit.week : bucket;
+
+        List<ActivityDetail> details = fromProvider(
+                () -> provider.listActivityDetails(startDate, endDate, null));
+
+        // Assign each activity to the calendar bucket its UTC start date falls in.
+        Map<LocalDate, List<ActivityDetail>> byBucket = details.stream()
+                .collect(Collectors.groupingBy(
+                        d -> bucketStart(d.startTime().atZone(ZoneOffset.UTC).toLocalDate(), unit)));
+
+        // Emit every bucket that overlaps the range, including empty ones, so the trend line
+        // is continuous — rest weeks are as much a trend as ramp weeks.
+        List<PeriodSummary> buckets = new ArrayList<>();
+        for (LocalDate start = bucketStart(startDate, unit);
+             !start.isAfter(endDate);
+             start = nextBucket(start, unit)) {
+            List<ActivityDetail> inBucket = byBucket.getOrDefault(start, List.of());
+            buckets.add(summarize(inBucket, start.toString(), bucketEnd(start, unit).toString()));
+        }
+
+        return new TrendsResult(unit.wire(), buckets);
+    }
+
+    /**
+     * Total volume over a set of activities, echoing the period labels. Shared by
+     * {@code summarizePeriod} (one period) and {@code getTrends} (one per bucket) so the two
+     * cannot drift in how they roll up.
+     */
+    private static PeriodSummary summarize(List<ActivityDetail> details, String startLabel, String endLabel) {
         double totalDistance = details.stream().mapToDouble(ActivityDetail::distanceMeters).sum();
         long totalDuration = details.stream().mapToLong(ActivityDetail::durationSeconds).sum();
         double totalElevation = details.stream().mapToDouble(ActivityDetail::elevationGainMeters).sum();
 
         return new PeriodSummary(
-                startDate.toString(),
-                endDate.toString(),
-                details.size(),
-                totalDistance,
-                totalDuration,
-                totalElevation,
+                startLabel, endLabel, details.size(),
+                totalDistance, totalDuration, totalElevation,
                 rollUpBySport(details));
+    }
+
+    // Calendar-aligned buckets (§2.4): weeks are ISO Monday–Sunday, months are 1st–last, UTC.
+    // The first/last bucket may extend beyond the query range; only in-range activities count.
+    private static LocalDate bucketStart(LocalDate date, BucketUnit unit) {
+        return unit == BucketUnit.month
+                ? date.withDayOfMonth(1)
+                : date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+    }
+
+    private static LocalDate bucketEnd(LocalDate start, BucketUnit unit) {
+        return unit == BucketUnit.month
+                ? start.plusMonths(1).minusDays(1)
+                : start.plusDays(6);
+    }
+
+    private static LocalDate nextBucket(LocalDate start, BucketUnit unit) {
+        return unit == BucketUnit.month ? start.plusMonths(1) : start.plusWeeks(1);
     }
 
     /**

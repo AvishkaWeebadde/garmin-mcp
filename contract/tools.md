@@ -1,9 +1,10 @@
 # fitmcp tool contract
 
 ```
-contract: v1
+contract: v2
 status:   frozen
-frozen:   2026-08-05
+frozen:   2026-08-05  (v1)
+revised:  2026-08-21  (v2 — adds getTrends; tools 1–3 unchanged from v1)
 ```
 
 This document is the shared specification that **both** the Java and Go implementations satisfy. It is written once, before either implementation. Where the two servers produce different JSON for the same call, this document decides which one is wrong — or, if it is silent, the gap in this document is itself the finding.
@@ -60,6 +61,7 @@ Ordering is part of the contract, because unspecified ordering produces a diff t
 
 - `listActivities.activities` — **descending by `startTime`** (most recent first). Ties broken by `activityId` ascending, lexicographic.
 - `summarizePeriod.bySport` — **ascending by `sport`**, lexicographic on the enum string.
+- `getTrends.buckets` — **ascending by `startDate`** (chronological). `bySport` within each bucket follows the same ascending-by-sport rule.
 
 ### 1.7 Error semantics
 
@@ -91,7 +93,9 @@ Every tool declares an `outputSchema` and returns `structuredContent`. Each resu
 
 ## 2. Tools
 
-Exactly three. The surface is deliberately small: Phase 3's cost scales with it, and a fourth tool would exercise no protocol behaviour the first three do not.
+Four, as of v2. The surface is kept small: Phase 3's cost scales with it. The first three exercise the full protocol surface; `getTrends` (§2.4, added in v2) exercises no *new* protocol behaviour, but adds a genuine capability — time-bucketed history — that the client needs to reason about trends and build training plans. It reuses the conventions and the `periodSummary` shape of the first three rather than introducing new ones, so its Phase 3 cost is one more `structuredContent` to diff, not a new surface.
+
+The reasoning itself — turning trends into a plan — stays with the client. The server exposes the data; it does not generate plans. A "plan generator" tool was rejected: its output is not deterministically contractable, and it would bake reasoning the model does better into a server both implementations must reproduce identically.
 
 ---
 
@@ -261,6 +265,68 @@ If no activity has that id, this is an `isError: true` result per §1.7 — not 
 
 ---
 
+### 2.4 `getTrends` (added in v2)
+
+**Description** (contractual)
+
+> Break an inclusive date range into consecutive calendar buckets (weekly or monthly) and summarise training volume in each, with a per-sport breakdown. Use this to see how volume changes over time and to reason about trends when building a plan; each bucket has the same shape as summarizePeriod.
+
+**Input schema**
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "startDate": {
+      "type": "string", "format": "date", "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "description": "First day of the range, inclusive, as a UTC calendar date."
+    },
+    "endDate": {
+      "type": "string", "format": "date", "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "description": "Last day of the range, inclusive, as a UTC calendar date."
+    },
+    "bucket": {
+      "type": "string", "enum": ["week", "month"], "default": "week",
+      "description": "Bucket granularity: 'week' (default) or 'month'."
+    }
+  },
+  "required": ["startDate", "endDate"],
+  "additionalProperties": false
+}
+```
+
+**Output schema**
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "bucket": { "type": "string" },
+    "buckets": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/periodSummary" }
+    }
+  },
+  "required": ["bucket", "buckets"],
+  "additionalProperties": false
+}
+```
+
+Each element of `buckets` is a **`periodSummary`** (§3) — the same shape `summarizePeriod` returns — whose `startDate` / `endDate` are the bucket's boundaries. `bucket` echoes the granularity applied (`"week"` or `"month"`).
+
+**Bucketing rules** — pin these; they are the most likely source of a Java/Go divergence:
+
+- Buckets are **calendar-aligned**, not aligned to `startDate`. A **week** is ISO-8601 Monday–Sunday; a **month** is the 1st to the last day. Both in UTC. This makes buckets comparable across queries.
+- Every bucket that overlaps `[startDate, endDate]` is returned, **ascending by `startDate`**. The first and last bucket may extend beyond the query range; only activities whose UTC start date is within the query range are counted (activities outside it are never fetched).
+- **Empty buckets are present**, not omitted: `activityCount: 0`, zero totals, `bySport: []`. A rest week is as much a trend as a ramp week. (This is deliberately unlike `bySport`, where an absent *sport* is omitted.)
+- An activity is placed in the bucket its **`startTime`** (as a UTC date) falls in. `bucket` defaults to `week` when absent.
+
+**Errors**: `endDate` before `startDate` is `isError: true` with the §1.7 bad-range text, exactly as the other range tools. Bucketing itself raises nothing.
+
+---
+
 ## 3. Shared object definitions
 
 ### `activitySummary`
@@ -298,6 +364,20 @@ Every field of `activitySummary`, plus:
 | `distanceMeters` | number | no | |
 | `durationSeconds` | integer | no | |
 
+### `periodSummary`
+
+Returned whole by `summarizePeriod` (§2.3) and as each element of `getTrends.buckets` (§2.4). Promoted to a shared definition in v2; its shape is unchanged from v1.
+
+| Field | Type | Nullable | Notes |
+|---|---|---|---|
+| `startDate` | string | no | `YYYY-MM-DD`. The period (or bucket) start. |
+| `endDate` | string | no | `YYYY-MM-DD`. The period (or bucket) end. |
+| `activityCount` | integer | no | `0` for an empty period. |
+| `totalDistanceMeters` | number | no | Sum; `0` when none. |
+| `totalDurationSeconds` | integer | no | Sum of elapsed time; `0` when none. |
+| `totalElevationGainMeters` | number | no | Sum; `0` when none. |
+| `bySport` | array | no | `sportTotals`, ascending by sport; empty array `[]` when none. Never null. |
+
 ---
 
 ## 4. Spec-version-dependent surface
@@ -317,7 +397,7 @@ Everything not listed in this section is expected to be byte-identical between t
 
 ## 5. Conformance checklist
 
-A run of Phase 3 should check, for each of the three tools:
+A run of Phase 3 should check, for each of the four tools:
 
 1. `tools/list` — name, title, description string, `inputSchema`, `outputSchema`.
 2. `tools/call` happy path — `structuredContent` deep-equal.
