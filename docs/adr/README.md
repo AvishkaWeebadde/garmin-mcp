@@ -17,3 +17,4 @@ Format: Context / Decision / Consequences. Keep them short. If an ADR needs more
 | [0009](0009-accept-2025-11-25-protocol-ceiling.md) | Accept the Java SDK's 2025-11-25 ceiling | Accepted |
 | [0010](0010-lowercase-enum-constants.md) | Lowercase Java enum constants for `Sport` | Accepted |
 | [0011](0011-schema-nullable-annotation.md) | `@Schema(nullable = true)` on every nullable field | Accepted |
+| [0012](0012-fit-file-provider.md) | `.FIT` file provider as the first real `ActivityProvider` | Accepted |
