@@ -110,7 +110,7 @@ WSL convention is `webi`-style: versioned dir in `~/.local/opt`, symlink without
 - [x] `tools/call` working end to end (`scripts/mcp_probe.py`, raw JSON-RPC)
 - [x] Full tool surface per contract — 3 tools, 7/7 happy paths conformant
 - [x] Wired into Claude Desktop through WSL — connected, protocol 2025-11-25, 3 tools announced in-app (2026-08-21)
-- [ ] Real provider (Strava or `.FIT`)
+- [ ] Real provider — **`.FIT` file** chosen (Strava API now paid); source-agnostic, filename-id primary + `file_id` fallback. Use the official Garmin FIT SDK for Java.
 
 ### Phase 2 — Go (go-sdk, streamable HTTP + stateless)
 - [ ] Same contract, stub provider
@@ -148,6 +148,8 @@ Phase 2 starts within ~3 weeks of Phase 1 finishing. Longer than that and the co
 - 2026-08-03 — WSL toolchains installed user-local under `~/.local/opt` rather than via apt. `sudo` needs a password, and it matches the `webi` layout already on the machine.
 - 2026-08-03 — Provider OAuth kept outside the MCP process (shared token file). The stdio server can't host a callback, so anything else would make the two implementations structurally different for a reason unrelated to MCP.
 - 2026-08-21 — **Resolved**: Claude Desktop launches the jar via WSL, not native Windows JDK 21. WSL already has JDK 21 (Windows has only 17), so this needs no new install; accepted the `wsl.exe`/path-translation trap surface in exchange. Config: `command: wsl.exe`, `args: -e /home/avishka/.local/opt/jdk/bin/java -jar /mnt/f/...jar`.
+- 2026-08-21 — First real provider is **`.FIT` file, not Strava OAuth**. Strava's API stopped being free on 2026-06-01 ($11.99/mo subscription, per-developer, no free tier); the free bulk export ships `.FIT` files, which feed the `fit-file` seam already in the architecture. Strava-OAuth adapter deferred, not dropped. **Pinned-fact update**: the CLAUDE.md line "Strava OAuth 2 works today" is now cost-gated.
+- 2026-08-21 — FIT provider `activityId` scheme: **primary = the Strava export filename's bare activity id** (immutable, edit-proof, unique, traceable to `strava.com/activities/<id>`, and coincides with a future Strava-API provider's ids → clean Phase 3 diff). **Fallback for non-Strava FIT = `file_id.time_created` + `serial_number` composite**; never `session.start_time` (users edit start times → not stable). Bare, no `fit-` prefix, to preserve id-equality with the Strava adapter. The Strava coincidence is a deliberate convenience, **not** a contract guarantee (§1.5 keeps ids opaque/per-provider). Candidate ADR-0012 when the provider is built.
 - 2026-08-05 — Claude wrote the Java implementation at explicit request. ADR-0001 records the exception and its cost.
 - 2026-08-05 — Contract written and frozen *before* any implementation, including a normative stub dataset. Without shared fixtures every Phase 3 diff would be noise.
 - 2026-08-05 — camelCase wire names (ADR-0003); nulls always present (ADR-0004); `bySport` an ordered array not a map (ADR-0005); error channel split by who-got-it-wrong (ADR-0006).
